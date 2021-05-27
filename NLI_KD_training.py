@@ -24,12 +24,13 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+import argparse
 
 #########################################################################
 # Prepare Parser
 ##########################################################################
 parser = default_parser()
+pre_args = parser.parse_args()
 DEBUG = True
 if DEBUG:
     logger.info("IN DEBUG MODE")
@@ -44,6 +45,7 @@ if DEBUG:
 
     # run Patient Teacher by uncommenting below cmd
     # argv = get_predefine_argv('glue', 'RTE', 'kd.cls')
+    argv = get_predefine_argv('glue', pre_args.task, pre_args.purpose)
     try:
         args = parser.parse_args(argv)
     except NameError:
@@ -51,8 +53,20 @@ if DEBUG:
 else:
     logger.info("IN CMD MODE")
     args = parser.parse_args()
+args.student_hidden_layers = pre_args.student_hidden_layers
+args.skip == pre_args.skip
 args = complete_argument(args)
-
+if args.student_hidden_layers == 3:
+    args.fc_layer_idx = '3,7'
+    
+if args.skip:
+    if args.student_hidden_layers == 6:
+        args.fc_layer_idx = '5,6,7,8,9,10'
+    elif args.student_hidden_layers == 3:
+        args.fc_layer_idx = '8,9,10'
+    else:
+        assert False
+        
 args.raw_data_dir = os.path.join(HOME_DATA_FOLDER, 'data_raw', args.task_name)
 args.feat_data_dir = os.path.join(HOME_DATA_FOLDER, 'data_feat', args.task_name)
 
@@ -140,7 +154,10 @@ if args.kd_model.lower() in ['kd', 'kd.cls']:
     logger.info('using normal Knowledge Distillation')
     output_all_layers = args.kd_model.lower() == 'kd.cls'
     student_encoder, student_classifier = init_model(task_name, output_all_layers, args.student_hidden_layers, student_config)
-
+    for p in student_encoder.parameters():
+        torch.nn.init.zeros_(p)
+    for p in student_classifier.parameters():
+        torch.nn.init.zeros_(p)
     n_student_layer = len(student_encoder.bert.encoder.layer)
     student_encoder = load_model(student_encoder, args.encoder_checkpoint, args, 'student', verbose=True)
     logger.info('*' * 77)
@@ -164,11 +181,13 @@ elif args.kd_model.lower() == 'kd.full':
                                                            num_hidden_layers=args.student_hidden_layers,
                                                            fix_pooler=True)
     n_student_layer = len(student_encoder.bert.encoder.layer)
+                
     student_encoder = load_model(student_encoder, args.encoder_checkpoint, args, 'student', verbose=True)
     logger.info('*' * 77)
 
     student_classifier = FullFCClassifierForSequenceClassification(student_config, num_labels, student_config.hidden_size,
                                                                    student_config.hidden_size, 6)
+                
     student_classifier = load_model(student_classifier, args.cls_checkpoint, args, 'exact', verbose=True)
     assert max(layer_idx) <= n_student_layer - 1, 'selected FC layer idx cannot exceed the number of transformers'
 else:
@@ -192,7 +211,7 @@ if args.do_train:
     if args.fp16:
         logger.info('FP16 activate, use apex FusedAdam')
         try:
-            from apex.optimizers import FP16_Optimizer
+            from apex.contrib.optimizers import FP16_Optimizer
             from apex.optimizers import FusedAdam
         except ImportError:
             raise ImportError(
@@ -211,7 +230,8 @@ if args.do_train:
         optimizer = BertAdam(optimizer_grouped_parameters,
                              lr=args.learning_rate,
                              warmup=args.warmup_proportion,
-                             t_total=num_train_optimization_steps)
+#                              t_total=num_train_optimization_steps
+                            )
 
 
 #########################################################################
@@ -220,11 +240,13 @@ if args.do_train:
 output_model_file = '{}_nlayer.{}_lr.{}_T.{}.alpha.{}_beta.{}_bs.{}'.format(args.task_name, args.student_hidden_layers,
                                                                             args.learning_rate,
                                                                             args.T, args.alpha, args.beta,
-                                                                            args.train_batch_size * args.gradient_accumulation_steps)
+                                                                          args.train_batch_size * args.gradient_accumulation_steps)
+
 if args.do_train:
     global_step = 0
     nb_tr_steps = 0
     tr_loss = 0
+    eval_accs = []
     student_encoder.train()
     student_classifier.train()
 
@@ -317,7 +339,11 @@ if args.do_train:
                                                        tr_loss / nb_tr_examples, tr_kd_loss / nb_tr_examples,
                                                        tr_ce_loss / nb_tr_examples, tr_loss_pt / nb_tr_examples),
                       file=log_train)
-
+            if global_step % 5000 == 0:
+                result = eval_model_dataloader_nli(args.task_name.lower(), eval_label_ids, student_encoder, student_classifier, eval_dataloader,
+                                               args.kd_model, num_labels, device, args.weights, args.fc_layer_idx, output_mode)
+                eval_accs.append(result['acc'])
+                
         # Save a trained model and the associated configuration
         if 'race' in task_name:
             result = eval_model_dataloader(student_encoder, student_classifier, eval_dataloader, device, False)
@@ -338,7 +364,11 @@ if args.do_train:
         else:
             torch.save(student_encoder.state_dict(), os.path.join(args.output_dir, output_model_file + f'_e.{epoch}.encoder.pkl'))
             torch.save(student_classifier.state_dict(), os.path.join(args.output_dir, output_model_file + f'_e.{epoch}.cls.pkl'))
-
+        
+        eval_accs = np.asfarray(eval_accs)
+        with open(os.path.join(args.output_dir, 'eval_accs.pickle'), 'wb') as f:
+            pickle.dump(eval_accs, f)
+            
 if args.do_eval:
     if 'race' not in args.task_name:
         result = eval_model_dataloader_nli(args.task_name.lower(), test_label_ids, student_encoder, student_classifier, test_dataloader,

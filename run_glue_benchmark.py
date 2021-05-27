@@ -31,11 +31,23 @@ logger = logging.getLogger(__name__)
 DEBUG = True
 
 ALL_TASKS = ['MRPC', 'RTE', 'SST-2', 'MNLI', 'QQP', 'MNLI-mm', 'QNLI', 'race-merge']
+parser = argparse.ArgumentParser()
+parser.add_argument('--all_outputs', action='store_true')
+pre_args = parser.parse_args()
+args = argparse.Namespace(n_gpu=1,
+                          device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                          fp16=True,
+                          eval_batch_size=32,
+                          max_seq_length=128,
+                         )
+
+args.all_outputs = pre_args.all_outputs
+
 
 if DEBUG:
-    interested_task = 'RTE'.split(',')
-    prediction_mode_input = 'teacher:train,dev,test'
-    output_all_layers = True   # True for patient teacher and False for normal teacher
+    interested_task = 'SST-2,QNLI'.split(',')
+    prediction_mode_input = 'teacher:dev,test,train'
+    output_all_layers = args.all_outputs   # True for patient teacher and False for normal teacher
     bert_model = 'bert-base-uncased'
     result_file = os.path.join(PROJECT_FOLDER, 'result/glue/result_summary/teacher_12layer_all.csv')
 else:
@@ -58,6 +70,11 @@ KD_DIR = os.path.join(HOME_DATA_FOLDER, 'outputs/KD/')
 sub_dir = '_'.join(os.path.basename(result_file).split('_')[:-1])
 
 prediction_mode, interested_set = prediction_mode_input.split(':')
+
+logger.info(f'sub_dir = {sub_dir}')
+logger.info(f'prediction_mode = {prediction_mode}')
+logger.info(f'interested_set = {interested_set}')
+
 assert prediction_mode in AVAILABLE_MODE, f'mode {prediction_mode} not available'
 
 
@@ -70,15 +87,7 @@ else:
 bert_model = os.path.join(HOME_DATA_FOLDER, f'models/pretrained/{bert_model}')
 config = BertConfig(os.path.join(bert_model, 'bert_config.json'))
 tokenizer = BertTokenizer.from_pretrained(bert_model, do_lower_case=True)
-args = argparse.Namespace(n_gpu=1,
-                          device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-                          fp16=True,
-                          eval_batch_size=32,
-                          max_seq_length=128)
 
-logger.info(f'sub_dir = {sub_dir}')
-logger.info(f'prediction_mode = {prediction_mode}')
-logger.info(f'interested_set = {interested_set}')
 
 result_df = pd.read_csv(result_file)
 

@@ -152,6 +152,15 @@ def default_parser():
                         default=False,
                         type=boolean_string,
                         help="do evaluation during training or not")
+    
+    parser.add_argument('--task', type=str, 
+                        help='an integer for printing repeatably',
+                       default='RTE')
+    parser.add_argument('--purpose', type=str,
+                       default='finetune_teacher')
+    
+    parser.add_argument('--skip', action='store_true')
+
     return parser
 
 
@@ -224,44 +233,40 @@ def get_predefine_argv(mode='glue', task_name='RTE', train_type='kd'):
                 '--max_seq_length', '128',
                 '--train_batch_size', '32',
                 '--learning_rate', '2e-5',
-                '--num_train_epochs', '4',
+                '--num_train_epochs', '1',
                 '--eval_batch_size', '32',
                 '--gradient_accumulation_steps', '1',
                 '--log_every_step', '1',
                 '--output_dir', os.path.join(HOME_DATA_FOLDER, f'outputs/KD/{task_name}/teacher_12layer'),
                 '--do_train', 'True',
                 '--do_eval', 'True',
-                '--fp16', 'True',
+                '--fp16', 'False',
             ]
         if train_type == 'finetune_teacher':
             argv += [
-                '--student_hidden_layers', '12',
                 '--kd_model', 'kd',
                 '--alpha', '0.0',    # alpha = 0 is equivalent to fine-tuning for KD
             ]
         if train_type == 'finetune_student':
             argv += [
-                '--student_hidden_layers', '6',
                 '--kd_model', 'kd',
                 '--alpha', '0.0',
             ]
         elif train_type == 'kd':
             argv += [
-                '--student_hidden_layers', '6',
                 '--kd_model', 'kd',
                 '--alpha', '0.7',
                 '--T', '20',
-                '--teacher_prediction', f'/home/JJteam/Project/PatientTeacherforBERT/data/outputs/KD/{task_name}/{task_name}_normal_kd_teacher_12layer_result_summary.pkl',
+                '--teacher_prediction', f'data/outputs/KD/{task_name}/{task_name}_normal_kd_teacher_12layer_result_summary.pkl',
             ]
         elif train_type == 'kd.cls':
             argv += [
                 '--learning_rate', '1e-5',
-                '--student_hidden_layers', '6',
                 '--kd_model', 'kd.cls',
                 '--alpha', '0.7',
                 '--beta', '500',
                 '--T', '10',
-                '--teacher_prediction', f'/home/JJteam/Project/PatientTeacherforBERT/data/outputs/KD/{task_name}/{task_name}_patient_kd_teacher_12layer_result_summary.pkl',
+                '--teacher_prediction', f'data/outputs/KD/{task_name}/{task_name}_patient_kd_teacher_12layer_result_summary.pkl',
                 '--fc_layer_idx', '1,3,5,7,9',   # this for pkd-skip
                 '--normalize_patience', 'True',
             ]

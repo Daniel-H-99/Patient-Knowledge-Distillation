@@ -9,3 +9,4 @@ regex
 # For Debug
 pandas
 matplotlib
+torch==1.4.0
